@@ -1,1 +1,11 @@
 ref
+.vscode
+zig-cache
+chat
+go.sum
+server
+server.v
+server.zig
+z
+zig_chat
+zig_chat.zig

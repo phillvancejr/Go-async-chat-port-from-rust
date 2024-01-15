@@ -2,9 +2,11 @@ package main
 
 import (
 	"bufio"
+	"fmt"
 	"net"
 	"strconv"
 	"sync"
+	"strings"
 )
 
 type Message struct {
@@ -32,51 +34,59 @@ func main() {
 	// quit channel
 	quit := make(chan int)
 
-	// setup sockets
+	// accept clients
 	go func() {
 		for {
 			client, e := server.Accept()
+			
 			if e != nil {
-				continue
+				// server is closed
+				if strings.Contains(e.Error(), "use of closed network connection") {
+					return
+				} else {
+					fmt.Println("error!:", e)
+					continue
+				}
 			}
-			client.Write([]byte("Welcome to Chat\n"))
+			client.Write([]byte("Welcome to Go Chat\nenter .exit to leave\n\n"))
 
 			go func() {
 				lock.Lock()
 				id := client_ids
 				client_ids++
-				lock.Unlock()
 
 				id_string := strconv.Itoa(id)
 
 				clients[id] = Client{make(chan string), client}
 
-				println("client", id, "connected!")
-				println("total clients:", len(clients), "\n")
+				fmt.Printf("client %v connected!\n", id)
+				fmt.Println("total clients:", len(clients))
 
 				received_messages := clients[id].channel
+				lock.Unlock()
 
 				// buffered reader to read line
 				reader := bufio.NewReader(client)
 
 				// channel to receive the message from sender
 				input := make(chan string)
-
-			chat:
-				for {
-					// read input
-					go func() {
+				// read input
+				go func() {
+					for {
 						line, _, _ := reader.ReadLine()
 
 						input <- string(line) + "\n"
-					}()
+					}
+				}()
+
+				for {
 
 					select {
 					case sent := <-input:
-						//println("sent:", sent, "len:", len(sent))
-						if len(sent) == 1 {
+						// quit condition
+						if strings.HasPrefix(sent, ".exit") {
 							quit <- id
-							break chat
+							return
 						}
 
 						// send message
@@ -93,36 +103,43 @@ func main() {
 	}()
 
 	println("Chat on port 8000")
-broadcast:
+
+// broadcast
 	for {
 		select {
 		case id := <-quit:
 			println("client", id, "quit!")
+			lock.Lock()
 			client := clients[id]
 			// goodbye
-			client.conn.Write([]byte("goodbye!"))
+			client.conn.Write([]byte("goodbye!\n"))
 			// close connection
 			client.conn.Close()
 			// delete client
 			delete(clients, id)
 
 			if len(clients) == 0 {
-				break broadcast
+				lock.Unlock()
+				println("shutdown")
+				return
 			}
+			lock.Unlock()
 		case msg := <-messages:
+			dark := "\x1b[90m"
+			lock.Lock()
 			for id, client := range clients {
 				// default color/white
 				color := "\x1b[0m"
 				// send darkened messge back to sender
 				if id == msg.id {
-					color = "\x1b[90m"
+					color = dark
 				}
 				client.channel <- color + msg.msg + "\x1b[0m"
 			}
+			lock.Unlock()
+			// display message on server side
+			fmt.Printf(dark + msg.msg + "\x1b[0m")
 
 		}
 	}
-
-	println("shutdown")
-
 }
